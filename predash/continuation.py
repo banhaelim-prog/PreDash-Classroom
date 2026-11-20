@@ -138,6 +138,14 @@ def _parse_bars(rows: list[dict]) -> list[dict]:
 
 
 def fetch_daily_bars(client, code: str, start_day: date, end_day: date) -> list[dict]:
+    # Broker adapters normalize their own chart response to the scanner schema.
+    if hasattr(client, "daily_bars_range"):
+        rows = client.daily_bars_range(code, start_day, end_day)
+        if not isinstance(rows, list):
+            raise ContinuationScanError("증권사 일봉 응답 형식이 올바르지 않습니다.")
+        return rows
+
+    # Backward-compatible KIS path.
     client.authorize()
     headers = {
         "authorization": "Bearer " + client.token,
@@ -286,7 +294,7 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
         "top": qualified[:top_n],
         "failures": failures[:50],
         "순위기준": "5일 누적 상승률 내림차순, 동률이면 5일 평균 거래대금 내림차순",
-        "가격기준": "KIS 수정주가",
+        "가격기준": "증권사 수정주가 기준",
     }
 
 
@@ -312,23 +320,26 @@ def enrich_candidate(client, official, code: str, asof: date) -> dict:
               "3년영업이익변화(%)": None, "최근영업현금흐름(억원)": None,
               "재무점검(4)": "자료 미연결", "재무기준": None}
 
-    try:
-        client.authorize()
-        headers = {
-            "authorization": "Bearer " + client.token, "appkey": client.key,
-            "appsecret": client.secret, "tr_id": QUOTE_TR_ID, "custtype": "P",
-        }
-        _, quote = client.call("GET", QUOTE_PATH, headers=headers, params={
-            "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
-        })
-        if str(quote.get("rt_cd")) == "0" and isinstance(quote.get("output"), dict):
-            raw_pbr = quote["output"].get("pbr")
-            if raw_pbr not in (None, ""):
-                value = float(str(raw_pbr).replace(",", ""))
-                if value >= 0:
-                    result["PBR"] = round(value, 2)
-    except Exception:
-        pass
+    # KIS exposes PBR on its quote endpoint. Toss stock master currently
+    # does not guarantee a PBR field, so do not infer or fabricate it.
+    if hasattr(client, "base") and hasattr(client, "key") and hasattr(client, "secret"):
+        try:
+            client.authorize()
+            headers = {
+                "authorization": "Bearer " + client.token, "appkey": client.key,
+                "appsecret": client.secret, "tr_id": QUOTE_TR_ID, "custtype": "P",
+            }
+            _, quote = client.call("GET", QUOTE_PATH, headers=headers, params={
+                "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
+            })
+            if str(quote.get("rt_cd")) == "0" and isinstance(quote.get("output"), dict):
+                raw_pbr = quote["output"].get("pbr")
+                if raw_pbr not in (None, ""):
+                    value = float(str(raw_pbr).replace(",", ""))
+                    if value >= 0:
+                        result["PBR"] = round(value, 2)
+        except Exception:
+            pass
 
     if official is None or not getattr(official, "dart_key", ""):
         result["재무점검(4)"] = "DART 키 미연결"
