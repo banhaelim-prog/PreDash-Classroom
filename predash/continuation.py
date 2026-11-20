@@ -67,16 +67,18 @@ def _parse_master(payload: bytes, market: str, tail_size: int) -> list[dict]:
             continue
 
         if market == "코스피":
-            etp, spac, halt, liquidation, managed = (
-                tail[22:23], tail[29:30], tail[34:35], tail[35:36], tail[36:37]
+            etp, spac, halt, liquidation, managed, preferred = (
+                tail[22:23], tail[29:30], tail[34:35], tail[35:36], tail[36:37], tail[158:159]
             )
         else:
-            etp, spac, halt, liquidation, managed = (
-                tail[18:19], tail[24:25], tail[53:54], tail[54:55], tail[55:56]
+            etp, spac, halt, liquidation, managed, preferred = (
+                tail[18:19], tail[24:25], tail[53:54], tail[54:55], tail[55:56], tail[153:154]
             )
         if _flag(etp.decode("ascii", errors="ignore")):
             continue
         if _flag(spac.decode("ascii", errors="ignore")):
+            continue
+        if preferred.decode("ascii", errors="ignore").strip() in ("1", "2"):
             continue
         if any(_flag(value.decode("ascii", errors="ignore"))
                for value in (halt, liquidation, managed)):
