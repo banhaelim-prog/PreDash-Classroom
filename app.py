@@ -45,6 +45,7 @@ if not hasattr(watch_module,'backup_names'):
     watch_module=importlib.reload(watch_module)
 clean_codes,export_backup,restore_backup,MAX_WATCH,clean_names,backup_names = (getattr(watch_module,k) for k in ('clean_codes','export_backup','restore_backup','MAX_WATCH','clean_names','backup_names'))
 from predash.paper import new_account, replay, execute, export_account, restore_account, PaperError
+from predash.continuation import scan_market, enrich_candidate, ContinuationScanError
 
 st.set_page_config(page_title='PreDash · 내 계좌 점검실', page_icon='◈', layout='wide')
 st.html('''<style>
@@ -259,11 +260,11 @@ with st.sidebar:
     st.link_button('교육자료', 'https://stock-dash-11a.streamlit.app/')
     st.link_button('소통 게시판', 'https://etf2x.com/learn/live')
     st.html('<div class="pd-brand-note">나의 투자 흐름을 읽는 공간</div><div class="pd-side-label">투자 워크스페이스</div>')
-    page=st.radio('메뉴',['오늘의 점검','관심종목','투자 근거','내 계좌','모의투자','매매 연습','매매 습관','연결 설정'],label_visibility='collapsed',key='navigation',
+    page=st.radio('메뉴',['오늘의 점검','관심종목','투자 근거','내 계좌','모의투자','매매 연습','매매 습관','연결 설정','연속 상승'],label_visibility='collapsed',key='navigation',
         index=0 if all(account_settings()[k] for k in ('key','secret','cano','product')) else 1,
         format_func=lambda item:{'오늘의 점검':'01  투자 대시보드','내 계좌':'04  내 계좌 · 보유종목',
             '관심종목':'02  관심종목 분석','매매 습관':'07  매매 기록 · 습관',
-            '모의투자':'05  모의투자 계좌','매매 연습':'06  매매 연습','연결 설정':'08  데이터 연결','투자 근거':'03  투자 근거 · 비교 차트'}[item])
+            '모의투자':'05  모의투자 계좌','매매 연습':'06  매매 연습','연결 설정':'08  데이터 연결','투자 근거':'03  투자 근거 · 비교 차트','연속 상승':'09  5일 연속 상승 분석'}[item])
     st.divider()
     large_text=st.toggle('글자 크게 보기',value=st.query_params.get('text','')=='large')
     if large_text:st.query_params['text']='large'
@@ -954,6 +955,102 @@ elif page=='매매 습관':
     if st.button('익명 집계 지침 만들기'):
         st.code(f'''당신은 투자 판단을 대체하지 않는 매매 기록 해설자입니다.\n계좌 환경: {mode_label} · 모의 성과를 실전 성과로 해석하지 마세요.
 조회기간: {saved['range'][0]} ~ {saved['range'][1]}\n매수 체결: {sum(x['side']=='buy' for x in fills)}건, 매도 체결: {sum(x['side']=='sell' for x in fills)}건\n매수가 확인된 청산 묶음: {len(summary['closed'])}건, 조회 전 매수 미확인 매도: {len(summary['unmatched_sells'])}건\n이 집계만으로 고가 매수, 손절 실패, 실적 악화 종목 매수 또는 타이밍 실패를 단정하지 마세요.\n확인된 사실과 판단에 필요한 추가 자료를 나누고, 다음 거래에서 기록할 질문 한 가지를 제시하세요.\n종목 추천이나 매수·매도 지시는 하지 마세요.''',language='text')
+    st.stop()
+elif page=='연속 상승':
+    st.title('5거래일 연속 상승 종목 분석')
+    st.caption('코스피·코스닥 상장 보통주 · 수정주가 기준 · 종가 5회 연속 상승 · 거래대금·거래량·재무 확인')
+    configured=all(account_settings()[k] for k in ('key','secret','cano','product'))
+    if not password:
+        st.warning('앱 비밀번호를 먼저 설정하고 로그인하세요.')
+        st.stop()
+    if not configured:
+        st.warning('연결 설정에서 본인 KIS 계좌를 연결하세요. 이 분석은 기존 kis_client()를 재사용합니다.')
+        st.stop()
+
+    st.info('전체 종목을 하나씩 조회합니다. 첫 실행은 수 분 이상 걸릴 수 있습니다. 조회 전용이며 주문 API는 사용하지 않습니다.')
+    if 'continuation_bar_cache' not in st.session_state:
+        st.session_state.continuation_bar_cache={}
+    if 'continuation_universe_cache' not in st.session_state:
+        st.session_state.continuation_universe_cache=None
+
+    if st.button('코스피·코스닥 전체 분석 시작',type='primary',use_container_width=True):
+        progress=st.progress(0,text='종목 목록 준비 중...')
+        status=st.empty()
+        def scan_progress(done,total,name):
+            progress.progress(done/total if total else 0,
+                text=f'전체 종목 조회 {done:,}/{total:,}')
+            status.caption('현재 조회: '+name)
+        try:
+            with st.spinner('KIS 일봉 시세를 수집하고 있습니다.'):
+                result=scan_market(
+                    kis_client(),
+                    on_progress=scan_progress,
+                    bar_cache=st.session_state.continuation_bar_cache,
+                    universe_cache=st.session_state.continuation_universe_cache,
+                    pause_seconds=0.15,
+                    top_n=5,
+                )
+            st.session_state.continuation_universe_cache=st.session_state.continuation_universe_cache or []
+            # The scanner's universe is downloaded once per session and the bar cache
+            # keeps successful ticker responses for subsequent reruns.
+            st.session_state.continuation_result=result
+            progress.progress(1.0,text='가격 조건 분석 완료')
+            status.empty()
+
+            provider=official_client() if api_key('DART_CRTFC_KEY') else None
+            if result['top']:
+                finance_progress=st.progress(0,text='상위 5개 재무지표 확인 중...')
+                for index,row in enumerate(result['top'],start=1):
+                    extra=enrich_candidate(kis_client(),provider,row['종목코드'],
+                        datetime.strptime(result['기준일'],'%Y-%m-%d').date())
+                    row.update(extra)
+                    finance_progress.progress(index/len(result['top']),
+                        text=f"재무 확인 {index}/{len(result['top'])} · {row['종목명']}")
+                finance_progress.empty()
+            st.session_state.continuation_result=result
+        except (BrokerError,ContinuationScanError) as exc:
+            st.error(str(exc))
+            st.caption('일부 종목만 조회한 결과를 전체 시장 순위로 확정하지 않습니다.')
+        except Exception as exc:
+            st.error('분석 중 예상하지 못한 오류가 발생했습니다: '+str(exc)[:180])
+            st.caption('기존 분석 결과가 있으면 유지합니다.')
+
+    result=st.session_state.get('continuation_result')
+    if result:
+        st.caption(f"기준일 {result['기준일']} · 대상 {result['대상종목수']:,}종목 · 조회 성공 {result['조회성공']:,} · 실패 {result['조회실패']:,}")
+        a,b,c=st.columns(3)
+        a.metric('5일 연속 상승',f"{result['연속상승종목수']:,}개")
+        b.metric('시장 전체 조회', '완료' if result['전체조회완료'] else '일부 누락')
+        c.metric('순위 기준','5일 누적 상승률')
+        if not result['전체조회완료']:
+            st.warning(f"조회 실패 {result['조회실패']:,}종목이 있어 아래 목록은 잠정 결과입니다. 전체 시장 TOP 5로 확정할 수 없습니다.")
+            with st.expander('조회 실패 종목 일부 확인'):
+                st.dataframe(result['failures'],hide_index=True,use_container_width=True)
+        else:
+            st.success('코스피·코스닥 전체 대상 조회 완료')
+        if result['top']:
+            st.dataframe(result['top'],hide_index=True,use_container_width=True,
+                column_config={
+                    '5일누적상승률(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    '최근일상승률(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    '기준일종가(원)':st.column_config.NumberColumn(format='%d원'),
+                    '5일평균거래대금(억원)':st.column_config.NumberColumn(format='%.2f억'),
+                    '거래대금증가율(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    '거래량증가율(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    'PBR':st.column_config.NumberColumn(format='%.2f배'),
+                    'ROE(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    '3년매출변화(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                    '3년영업이익변화(%)':st.column_config.NumberColumn(format='%.2f%%'),
+                })
+            st.download_button('TOP 5 CSV 다운로드',
+                data=__import__('pandas').DataFrame(result['top']).to_csv(index=False).encode('utf-8-sig'),
+                file_name=f"kis-5day-risers-{result['기준일']}.csv",mime='text/csv')
+            st.caption('거래량·거래대금 증가율은 최근 5거래일 평균과 그 직전 20거래일 평균 비교입니다. 재무점검은 PBR<1, ROE≥15%, 3년 영업이익 증가, 최근 영업현금흐름 양수를 각각 확인한 개수이며 매수 신호가 아닙니다.')
+        else:
+            st.info('기준일 현재 5거래일 연속 종가 상승 조건을 만족한 종목이 없습니다.')
+        st.caption('가격: KIS 수정주가 · 재무: OpenDART 연결/별도 동일 기준 중 확보 가능한 자료 · 자료 부족은 공란 · 순위는 5일 누적 상승률 기준')
+    else:
+        st.info('분석 시작을 누르면 전체 종목을 조회합니다. 완료 전에는 순위가 표시되지 않습니다.')
     st.stop()
 else:
     configured=all(account_settings()[k] for k in ('key','secret','cano','product'))
