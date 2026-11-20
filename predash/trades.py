@@ -16,7 +16,7 @@ def _positive(value, label):
         raise TradeDataError(f'{label} 값이 올바르지 않습니다.') from None
 
 def normalize_kis(rows, skipped=None):
-    """Only actual, non-cancelled executions; one KIS row per order aggregate."""
+    """Only actual, non-cancelled executions; one broker row per order aggregate."""
     fills=[];seen={}
     for index,row in enumerate(rows):
         if str(row.get('cncl_yn','N')).upper() in ('Y','1'): continue
@@ -50,7 +50,7 @@ def normalize_kis(rows, skipped=None):
             continue
         seen[unique]=(qty,price,amount)
         fills.append({'at':at,'code':code,'name':str(row.get('prdt_name') or code),'side':side,
-                      'quantity':qty,'price':price,'amount':amount,'source':'KIS 체결'})
+                      'quantity':qty,'price':price,'amount':amount,'source':'증권사 체결'})
     return sorted(fills,key=lambda x:(x['at'],x['code'],0 if x['side']=='buy' else 1))
 
 def closed_trades(fills):
@@ -125,5 +125,5 @@ def daily_activity(fills, day, incomplete=False):
             'return_pct':pnl/amount*100 if pnl is not None and amount else None,
             'count':len(todays),'incomplete':incomplete,
             'reason':'일부 체결 제외' if incomplete else '매수 원가 또는 체결 순서 미확인' if not valid else '',
-            'basis':'거래금액: KIS 체결금액 우선, 미제공 시 평균가×수량 · 손익: 평균가 FIFO 계산 · 수수료·세금 미반영'}
+            'basis':'거래금액: 증권사 체결금액 우선, 미제공 시 평균가×수량 · 손익: 평균가 FIFO 계산 · 수수료·세금 미반영'}
 
