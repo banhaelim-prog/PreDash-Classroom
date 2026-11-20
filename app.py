@@ -197,9 +197,9 @@ def stock_evidence_charts(item):
         if history:
             chart=[{'날짜':r['date'],**{label:r['cumulative'][k] for label,k in [('외국인','foreign'),('기관','institution'),('개인','individual')]}} for r in history]
             st.line_chart(chart,x='날짜',y=['외국인','기관','개인'],height=300,color=['#b63f3f','#214b3a','#527dad'])
-            st.caption(f"KIS · {history[0]['date']}~{history[-1]['date']} · {len(history)}거래 관측일 · 누적 순매수 수량(주), 보유량 아님 · 시작일 직전 누적=0")
+            st.caption(f"증권사 · {history[0]['date']}~{history[-1]['date']} · {len(history)}거래 관측일 · 누적 순매수 수량(주), 보유량 아님 · 시작일 직전 누적=0")
             st.dataframe([{'투자자':label,'누적 순매수(주)':history[-1]['cumulative'][k]} for label,k in [('외국인','foreign'),('기관','institution'),('개인','individual')]],hide_index=True,use_container_width=True)
-        else:st.info('근거 자료 새로고침으로 수급을 조회하세요. KIS 연결이 필요합니다.')
+        else:st.info('근거 자료 새로고침으로 수급을 조회하세요. 선택한 증권사의 수급 API를 지원해야 합니다.')
 
 def watch_fetch(code,provider,today):
     result={'code':code,'name':st.session_state.get('watch_names',{}).get(code,code),'lamp':None,'metrics':None,'flow':None,'krx':None,'report':None,'errors':{},
@@ -316,7 +316,7 @@ def render_empty_dashboard(include_market=True):
     """Public-safe layout preview: no account values or fabricated market signals."""
     if include_market:
         st.html('<div class="pd-market"><div><strong>⚪ 코스피 · 조회 전</strong><span class="details">지수 · 10일선 · 20일선은 연결 후 표시</span></div><div><strong>⚪ 코스닥 · 조회 전</strong><span class="details">지수 · 10일선 · 20일선은 연결 후 표시</span></div></div>')
-    st.html('<div class="pd-summary"><div><span>국내주식 평가액</span><strong>조회 전</strong><small>한국투자증권 조회 기준</small></div><div><span>증권사 평가손익</span><strong class="gold">조회 전</strong><small>한국투자증권 조회 기준</small></div><div><span>보유종목</span><strong>조회 전</strong><small>계좌 연결 후 표시</small></div></div>')
+    st.html('<div class="pd-summary"><div><span>국내주식 평가액</span><strong>조회 전</strong><small>연결된 증권사 조회 기준</small></div><div><span>증권사 평가손익</span><strong class="gold">조회 전</strong><small>연결된 증권사 조회 기준</small></div><div><span>보유종목</span><strong>조회 전</strong><small>계좌 연결 후 표시</small></div></div>')
     st.html(compact_dashboard({'positions':[]},{},None,'체결 기록을 가져오면 표시됩니다.'))
     st.caption('계좌 금액과 종목은 조회 후 표시됩니다.')
 
@@ -530,7 +530,7 @@ elif page=='매매 연습':
 elif page=='관심종목':
     st.title('관심종목 점검')
     st.html('<div class="pd-intro">저장한 종목의 추세·실적·수급을 한 화면에서 점검하세요.</div>')
-    st.caption('일별 종가: 공공데이터포털 · 동기 실적: OpenDART · 수급: KIS 연결 시 · 주문 기능 없음')
+    st.caption('일별 종가: 공공데이터포털 · 동기 실적: OpenDART · 수급: 증권사 API 지원 시 · 주문 기능 없음')
     if not api_key('DATA_GO_KR_SERVICE_KEY'):
         st.info('연결 설정에서 공공데이터 API 키를 입력하면 관심종목 조회가 열립니다.')
         st.stop()
@@ -632,7 +632,7 @@ elif page=='관심종목':
             growth=signed(metrics['growth_pct'],'%') if metrics else '자료 없음'
             margin=f"{metrics['margin_pct']:,.1f}%" if metrics and metrics['margin_pct'] is not None else '자료 없음'
             flow_html=' · '.join(f"{label} {signed(flow['daily'][key],'주')}" for label,key in
-                (('외국인','foreign'),('기관','institution'),('개인','individual'))) if flow else 'KIS 수급 자료 없음'
+                (('외국인','foreign'),('기관','institution'),('개인','individual'))) if flow else '증권사 수급 자료 없음'
             financial=(f"<small>{period}</small><span class='pd-watch-title'>매출 {metrics['revenue']:,.1f}억 · 영업이익 {metrics['profit']:,.1f}억</span>"
                        f"<small>영업이익 동기 증가율 {growth} · 이익률 {margin}</small>" if metrics else '<small>동기 실적 보류</small>')
             averages=f"10일선 {lamp['ma10']:,.0f} · 20일선 {lamp['ma20']:,.0f}" if lamp else '이동평균 자료 없음'
@@ -685,7 +685,7 @@ elif page=='투자 근거':
                 try:
                     settings=account_settings()
                     if not all(settings[k] for k in ('key','secret','cano','product')):
-                        raise EvidenceError('시장 비교 차트는 KIS 시세 연결이 필요합니다.')
+                        raise EvidenceError('시장 비교 차트는 연결된 증권사의 지수 시세 API가 필요합니다.')
                     actual=item.get('benchmark')
                     if actual and actual!=market_name:
                         raise EvidenceError('종목 상장시장은 '+actual+'입니다. 비교 시장을 변경하세요.')
@@ -729,7 +729,7 @@ elif page=='투자 근거':
             c.metric('시장 대비 차이',f"{last['stock']-last['market']:+.1f}%p")
             chart=[{'날짜':r['date'],'종목':r['stock'],market_name:r['market']} for r in data['chart']]
             st.line_chart(chart,x='날짜',y=['종목',market_name],height=250,color=['#214b3a','#a68137'])
-            st.caption(f"공통 거래일 {len(chart)}일 · {chart[0]['날짜']}=100 · {chart[-1]['날짜']}까지 · 종목: 공공데이터포털 / 시장: KIS · 배당 미포함 가격 변화")
+            st.caption(f"공통 거래일 {len(chart)}일 · {chart[0]['날짜']}=100 · {chart[-1]['날짜']}까지 · 종목: 공공데이터포털 / 시장: 연결 증권사 · 배당 미포함 가격 변화")
         else:st.info(data['chart_error'] or '공통 비교 시세 부족')
         if lamp:st.html(f"<div class='pd-badge'>종가 {lamp['close']:,.0f}원 · {lamp['state']} · 10일선 {lamp['ma10']:,.0f} / 20일선 {lamp['ma20']:,.0f} · {lamp['date']}</div>")
     with right:
@@ -889,7 +889,7 @@ elif page=='매매 습관':
     habit_mode='real' if mode_label=='실전 계좌' else 'demo'
     settings=account_settings(habit_mode)
     if habit_mode=='real' and account_settings()['mode']!='real':
-        st.warning('실전 분석에는 KIS_ENV=real과 실전용 KIS 키 설정이 필요합니다.')
+        st.warning('실전 분석에는 실전 계좌 연결이 필요합니다.')
         st.stop()
     st.html(f"<div class='pd-badges'><span class='pd-badge gold'>분석 대상 · {mode_label}</span></div>")
     st.caption(f'{mode_label}의 체결 기록 분석 · 미체결·취소 제외 · 현재 로그인 세션에 보관')
@@ -1064,7 +1064,7 @@ elif page=='연속 상승':
             st.caption('거래량·거래대금 증가율은 최근 5거래일 평균과 그 직전 20거래일 평균 비교입니다. 재무점검은 PBR<1, ROE≥15%, 3년 시작 대비 영업이익 증가, 최근 영업현금흐름 양수를 각각 확인한 개수이며 매수 신호가 아닙니다.')
         else:
             st.info('기준일 현재 5거래일 연속 종가 상승 조건을 만족한 종목이 없습니다.')
-        st.caption('가격: KIS 수정주가 · 재무: OpenDART 연결/별도 동일 기준 중 확보 가능한 자료 · 자료 부족은 공란 · 순위는 5일 누적 상승률 기준')
+        st.caption('가격: 연결된 증권사의 수정주가 · 재무: OpenDART 연결/별도 동일 기준 중 확보 가능한 자료 · 자료 부족은 공란 · 순위는 5일 누적 상승률 기준')
     else:
         st.info('분석 시작을 누르면 전체 종목을 조회합니다. 완료 전에는 순위가 표시되지 않습니다.')
     st.stop()
@@ -1138,7 +1138,7 @@ else:
                 move=('▲ 상승' if info['change']>0 else '▼ 하락' if info['change']<0 else '보합')
                 move_cls='pd-plus' if info['change']>0 else 'pd-minus' if info['change']<0 else 'pd-muted'
                 movement=f"<span class='pd-index-change'>전 거래일 대비 <b class='{move_cls}'>{move} {info['change']:+,.2f}p · {info['change_pct']:+.2f}%</b></span>"
-                pieces.append(f"<div><strong><span class='pd-lamp {color}'></span>{name} · {state}</strong><span class='pd-index-value'>{info['close']:,.2f}</span>{movement}<span class='details'>10일선 {info['ma10']:,.2f} · 20일선 {info['ma20']:,.2f}</span><small>일별 기준 {info['date']} · KIS 일별 종가</small></div>")
+                pieces.append(f"<div><strong><span class='pd-lamp {color}'></span>{name} · {state}</strong><span class='pd-index-value'>{info['close']:,.2f}</span>{movement}<span class='details'>10일선 {info['ma10']:,.2f} · 20일선 {info['ma20']:,.2f}</span><small>일별 기준 {info['date']} · 증권사 일별 종가</small></div>")
             else:
                 reason=html.escape(market['failures'].get(name) or '20거래일 자료 부족 또는 기준일이 오래됐습니다.')
                 pieces.append(f"<div><strong>⚪ {name} · 판정 보류</strong><span class='details'>{reason}</span></div>")
@@ -1177,7 +1177,7 @@ else:
         st.stop()
     st.caption(f"{'실전' if snap['mode']=='real' else '모의'} 계좌 · 조회 {snap['fetched']}")
     pnl_color='pd-plus' if snap['pnl']>0 else 'pd-minus' if snap['pnl']<0 else ''
-    st.html(f"<div class='pd-summary'><div><span>국내주식 평가액</span><strong>{snap['value']:,.0f}원</strong><small>한국투자증권 조회 기준</small></div><div><span>증권사 평가손익</span><strong class='{pnl_color}'>{snap['pnl']:+,.0f}원</strong><small>한국투자증권 조회 기준</small></div><div><span>보유종목</span><strong>{len(snap['positions'])}개</strong><small>국내주식 잔고</small></div></div>")
+    st.html(f"<div class='pd-summary'><div><span>국내주식 평가액</span><strong>{snap['value']:,.0f}원</strong><small>연결된 증권사 조회 기준</small></div><div><span>증권사 평가손익</span><strong class='{pnl_color}'>{snap['pnl']:+,.0f}원</strong><small>연결된 증권사 조회 기준</small></div><div><span>보유종목</span><strong>{len(snap['positions'])}개</strong><small>국내주식 잔고</small></div></div>")
     reports=st.session_state.get('reports',{})
     errors=st.session_state.get('report_errors',{})
     if not reports and page=='내 계좌':
@@ -1214,7 +1214,7 @@ else:
                 f"<div><small>평균 매입가 / 현재가</small><b>{p['average_cost']:,.0f} / {p['price']:,.0f}원</b></div></div>"
                 f"<div class='pd-holding-foot'>손익률 {signed(health['rate'],'%')} · 영업이익 증가율 {signed(health['growth'],'%')}<br>{html.escape(health['summary'])}<br>{earnings}</div></div>")
             with st.expander(f"{p['name']} · 재무·공시 근거"):
-                st.caption(f"한국투자증권 잔고 {snap['fetched']} · 평가액 대비 비중 · 주문 기능 없음")
+                st.caption(f"증권사 잔고 {snap['fetched']} · 평가액 대비 비중 · 주문 기능 없음")
                 if st.button('종목·시장 1·5·20일 성과 조회',key='holding_relative_'+p['code']):
                     st.session_state['holding_evidence_'+p['code']]=watch_fetch(p['code'],official_client(),today)
                 held=st.session_state.get('holding_evidence_'+p['code'])
@@ -1241,7 +1241,7 @@ else:
             with left:
                 if largest:
                     name=html.escape(str(largest['name']));code=html.escape(str(largest['code']))
-                    body=f"<div class='pd-card-body'><div><small>가장 큰 보유종목</small><strong>{name}</strong><small>{code} · {largest['quantity']:g}주 · 평가액 {largest['value']:,.0f}원</small><small>증권사 평가손익 {largest['pnl']:+,.0f}원</small></div><div class='pd-card-focus'><b>국내주식 평가액 대비</b><strong>{largest['weight']:.1f}%</strong><small>전체 평가액 {snap['value']:,.0f}원 기준</small></div></div><div class='pd-card-note'>한국투자증권 잔고 조회 {html.escape(str(snap['fetched']))} · 비중은 평가액 기준이며 현금·해외자산은 포함하지 않습니다.</div>"
+                    body=f"<div class='pd-card-body'><div><small>가장 큰 보유종목</small><strong>{name}</strong><small>{code} · {largest['quantity']:g}주 · 평가액 {largest['value']:,.0f}원</small><small>증권사 평가손익 {largest['pnl']:+,.0f}원</small></div><div class='pd-card-focus'><b>국내주식 평가액 대비</b><strong>{largest['weight']:.1f}%</strong><small>전체 평가액 {snap['value']:,.0f}원 기준</small></div></div><div class='pd-card-note'>증권사 잔고 조회 {html.escape(str(snap['fetched']))} · 비중은 평가액 기준이며 현금·해외자산은 포함하지 않습니다.</div>"
                 else:body="<div class='pd-card-empty'>현재 보유수량이 있는 국내주식이 없습니다.</div>"
                 st.html("<div class='pd-card'><div class='pd-card-title'><b>01</b>보유 비중 확인</div><div class='pd-card-sub'>한 종목에 계좌가 집중돼 있는지 살펴보세요.</div>"+body+"</div>")
                 if earnings:
@@ -1278,4 +1278,4 @@ else:
                         ('최근 공시 확인',f"{disclosure['position']['name']} 원문 확인" if disclosure else '최근 자료 없음')]
                 lines=''.join(f"<div class='pd-check'><b>{i:02d}</b>{html.escape(label)} · {html.escape(value)}</div>" for i,(label,value) in enumerate(checks,1))
                 st.html("<div class='pd-evidence'><h3>오늘의 확인 순서</h3>"+lines+"<p>계좌 조회 "+html.escape(str(snap['fetched']))+"</p></div>")
-            st.caption('자료: 한국투자증권 · OpenDART · 공공데이터포털. 확인 순서는 매수·매도 추천이 아닙니다.')
+            st.caption('자료: 연결 증권사 · OpenDART · 공공데이터포털. 확인 순서는 매수·매도 추천이 아닙니다.')
