@@ -1,4 +1,4 @@
-"""KIS universe-wide 5-session consecutive-riser scanner.
+"""Broker-neutral universe-wide 5-session consecutive-riser scanner.
 
 Read-only market data only. The scan is explicit/manual because a full-market
 scan requires one daily-chart request per listed common stock.
@@ -92,7 +92,7 @@ def _parse_master(payload: bytes, market: str, tail_size: int) -> list[dict]:
 
 
 def load_universe(timeout: int = 30) -> list[dict]:
-    """Download official KIS KOSPI/KOSDAQ master files."""
+    """Load the public KOSPI/KOSDAQ symbol universe; broker credentials are not used."""
     all_symbols = []
     for market, (url, tail_size) in MASTER_URLS.items():
         try:
@@ -138,6 +138,14 @@ def _parse_bars(rows: list[dict]) -> list[dict]:
 
 
 def fetch_daily_bars(client, code: str, start_day: date, end_day: date) -> list[dict]:
+    # Broker adapters normalize their own chart response to the scanner schema.
+    if hasattr(client, "daily_bars_range"):
+        rows = client.daily_bars_range(code, start_day, end_day)
+        if not isinstance(rows, list):
+            raise ContinuationScanError("증권사 일봉 응답 형식이 올바르지 않습니다.")
+        return rows
+
+    # Backward-compatible KIS path.
     client.authorize()
     headers = {
         "authorization": "Bearer " + client.token,
@@ -158,7 +166,7 @@ def fetch_daily_bars(client, code: str, start_day: date, end_day: date) -> list[
     if str(data.get("rt_cd")) != "0":
         message_code = str(data.get("msg_cd", ""))
         if message_code.startswith("EGW002"):
-            raise ContinuationScanError("KIS API 호출 제한 응답을 받았습니다. 잠시 후 다시 시도하세요.")
+            raise ContinuationScanError("증권사 API 호출 한도 응답을 받았습니다. 잠시 후 다시 시도하세요.")
         raise client.result_error(data, "연속 상승 일봉 조회 실패")
     rows = data.get("output2")
     if not isinstance(rows, list):
@@ -263,7 +271,7 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
             if any(term in message for term in ("인증 거부", "HTTP 401", "HTTP 403",
                                                   "HTTP 429", "호출 제한")):
                 raise ContinuationScanError(
-                    "KIS 인증 또는 호출 제한으로 전체 스캔을 중단했습니다. "
+                    "증권사 인증 또는 호출 제한으로 전체 스캔을 중단했습니다. "
                     "키 환경과 호출 간격을 확인하세요. " + message[:180]
                 ) from exc
             failures.append({"종목코드": item["code"], "종목명": item["name"],
@@ -286,7 +294,7 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
         "top": qualified[:top_n],
         "failures": failures[:50],
         "순위기준": "5일 누적 상승률 내림차순, 동률이면 5일 평균 거래대금 내림차순",
-        "가격기준": "KIS 수정주가",
+        "가격기준": "증권사 수정주가 기준",
     }
 
 
@@ -312,23 +320,26 @@ def enrich_candidate(client, official, code: str, asof: date) -> dict:
               "3년영업이익변화(%)": None, "최근영업현금흐름(억원)": None,
               "재무점검(4)": "자료 미연결", "재무기준": None}
 
-    try:
-        client.authorize()
-        headers = {
-            "authorization": "Bearer " + client.token, "appkey": client.key,
-            "appsecret": client.secret, "tr_id": QUOTE_TR_ID, "custtype": "P",
-        }
-        _, quote = client.call("GET", QUOTE_PATH, headers=headers, params={
-            "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
-        })
-        if str(quote.get("rt_cd")) == "0" and isinstance(quote.get("output"), dict):
-            raw_pbr = quote["output"].get("pbr")
-            if raw_pbr not in (None, ""):
-                value = float(str(raw_pbr).replace(",", ""))
-                if value >= 0:
-                    result["PBR"] = round(value, 2)
-    except Exception:
-        pass
+    # KIS exposes PBR on its quote endpoint. Toss stock master currently
+    # does not guarantee a PBR field, so do not infer or fabricate it.
+    if hasattr(client, "base") and hasattr(client, "key") and hasattr(client, "secret"):
+        try:
+            client.authorize()
+            headers = {
+                "authorization": "Bearer " + client.token, "appkey": client.key,
+                "appsecret": client.secret, "tr_id": QUOTE_TR_ID, "custtype": "P",
+            }
+            _, quote = client.call("GET", QUOTE_PATH, headers=headers, params={
+                "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
+            })
+            if str(quote.get("rt_cd")) == "0" and isinstance(quote.get("output"), dict):
+                raw_pbr = quote["output"].get("pbr")
+                if raw_pbr not in (None, ""):
+                    value = float(str(raw_pbr).replace(",", ""))
+                    if value >= 0:
+                        result["PBR"] = round(value, 2)
+        except Exception:
+            pass
 
     if official is None or not getattr(official, "dart_key", ""):
         result["재무점검(4)"] = "DART 키 미연결"

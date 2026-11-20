@@ -12,6 +12,19 @@
 
 증권사 키는 Secrets나 GitHub에 저장하지 않습니다. 접속 세션에서만 사용하며 연결 해제·로그아웃 시 키와 접속 중 실습 자료를 제거합니다. 필요한 실습 기록은 먼저 백업하세요. 서버가 키를 처리하므로 각자 관리하는 앱에서 사용하세요.
 
+## 증권사 연결
+
+연결 설정에서 한국투자증권 또는 토스증권 Open API를 선택할 수 있습니다.
+
+토스증권 사용 전:
+1. 토스증권 WTS → 설정 → Open API에서 Client ID와 Client Secret을 발급합니다.
+2. 같은 화면의 허용 IP 관리에 배포 서버의 외부 IP를 등록합니다. 허용되지 않은 IP의 요청은 403으로 거부됩니다.
+3. Open API 계좌 목록에서 accountSeq를 확인해 앱 연결 화면에 입력합니다.
+4. 토스증권 Open API는 이 앱에서 실전 계좌의 조회 기능에만 연결됩니다. 모의투자 페이지는 한국투자증권 모의계좌 전용입니다.
+
+참고: https://home.tossinvest.com/ko/open-api
+개발 문서: https://developers.tossinvest.com/docs
+
 ## 교육과 소통
 
 - 교육자료: https://stock-dash-11a.streamlit.app/
