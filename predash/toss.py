@@ -249,7 +249,54 @@ class Toss:
         raise BrokerError("토스증권 시장 투자자별 매매대금의 기간·필드 매핑 검증이 필요합니다.")
 
     def fills(self, days=30):
-        raise BrokerError(
-            "토스증권 주문내역 조회는 KIS 체결 응답과 구조가 다릅니다. "
-            "실제 주문 상세의 체결 필드 확인 후 매매습관 화면에 연결해야 합니다."
-        )
+        """Read closed Toss orders and normalize confirmed execution aggregates."""
+        if not isinstance(days, int) or not 1 <= days <= 90:
+            raise BrokerError("조회기간은 1~90일 사이로 선택하세요.")
+        end = datetime.now(ZoneInfo("Asia/Seoul")).date()
+        start = end - timedelta(days=days - 1)
+        rows = []
+        cursor = None
+        for _ in range(100):
+            params = {"status": "CLOSED"}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._request("GET", "/api/v1/orders", account=True, params=params)
+            result = data.get("result")
+            orders = result.get("orders") if isinstance(result, dict) else None
+            if not isinstance(orders, list):
+                raise BrokerError("토스증권 종료 주문 목록 응답 형식을 확인할 수 없습니다.")
+            for order in orders:
+                execution = order.get("execution") or {}
+                qty = execution.get("filledQuantity")
+                price = execution.get("averageFilledPrice")
+                amount = execution.get("filledAmount")
+                if not qty or not price:
+                    continue
+                stamp = execution.get("filledAt") or order.get("orderedAt")
+                if not stamp:
+                    continue
+                try:
+                    at = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                    if at.tzinfo is not None:
+                        at = at.astimezone(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
+                except ValueError:
+                    continue
+                if not start <= at.date() <= end:
+                    continue
+                side = {"BUY": "02", "SELL": "01"}.get(str(order.get("side", "")).upper())
+                if not side:
+                    continue
+                rows.append({
+                    "cncl_yn": "N", "tot_ccld_qty": qty, "sll_buy_dvsn_cd": side,
+                    "pdno": order.get("symbol", ""), "prdt_name": order.get("name") or order.get("symbol", ""),
+                    "ord_dt": at.strftime("%Y%m%d"), "ord_tmd": at.strftime("%H%M%S"),
+                    "avg_prvs": price, "tot_ccld_amt": amount or _number(qty) * _number(price),
+                    "ord_gno_brno": self.account, "odno": order.get("orderId", ""),
+                })
+            cursor = result.get("nextCursor") if isinstance(result, dict) else None
+            if not cursor:
+                break
+        else:
+            raise BrokerError("토스증권 주문 내역 페이지 한도를 초과했습니다.")
+        return {"rows": rows, "from": start.isoformat(), "to": end.isoformat(),
+                "fetched": datetime.now(ZoneInfo("Asia/Seoul")).isoformat()}
