@@ -164,11 +164,13 @@ def fetch_daily_bars(client, code: str, start_day: date, end_day: date) -> list[
     return _parse_bars(rows)
 
 
-def evaluate_five_session_rise(item: dict, bars: list[dict]) -> dict | None:
+def evaluate_five_session_rise(item: dict, bars: list[dict], expected_dates=None) -> dict | None:
     """Five consecutive close increases; 25 bars also enable 5-vs-20 averages."""
     if len(bars) < 6:
         return None
     six = bars[-6:]
+    if expected_dates is not None and [row["date"] for row in six] != list(expected_dates):
+        return None
     closes = [row["close"] for row in six]
     if not all(closes[index] > closes[index - 1] for index in range(1, 6)):
         return None
@@ -223,6 +225,22 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
         if isinstance(universe_cache, list):
             universe_cache.extend(universe)
     cache = bar_cache if bar_cache is not None else {}
+    if bar_cache is not None:
+        for key in list(bar_cache):
+            if isinstance(key, tuple) and len(key) == 3 and key[2] != end_day.isoformat():
+                bar_cache.pop(key, None)
+    market_sessions = {}
+    for market, index_code in (("코스피", "0001"), ("코스닥", "1001")):
+        try:
+            index_rows = client.index_bars(index_code, end_day)
+            dates = sorted({datetime.strptime(str(row["stck_bsop_date"]), "%Y%m%d").date()
+                            for row in index_rows if row.get("stck_bsop_date")})
+            dates = [day for day in dates if day <= end_day]
+            if len(dates) < 6:
+                raise ContinuationScanError(f"{market} 거래일 달력이 6거래일 미만입니다.")
+            market_sessions[market] = dates[-6:]
+        except Exception as exc:
+            raise ContinuationScanError(f"{market} 거래일 확인 실패: {str(exc)[:140]}") from exc
     qualified, failures = [], []
 
     for index, item in enumerate(universe, start=1):
@@ -235,7 +253,7 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
                 if pause_seconds:
                     time.sleep(pause_seconds)
             bars = [bar for bar in bars if bar["date"] <= end_day]
-            result = evaluate_five_session_rise(item, bars)
+            result = evaluate_five_session_rise(item, bars, market_sessions[item["market"]])
             if result:
                 qualified.append(result)
         except Exception as exc:
@@ -331,8 +349,7 @@ def enrich_candidate(client, official, code: str, asof: date) -> dict:
                 profit = _amount(rows, ("IS", "CIS"), ("dart_OperatingIncomeLoss",),
                                  ("영업이익", "영업이익(손실)"))
                 net_income = _amount(rows, ("IS", "CIS"),
-                                     ("ifrs-full_ProfitLossAttributableToOwnersOfParent",
-                                      "ifrs-full_ProfitLoss"),
+                                     ("ifrs-full_ProfitLoss", "ifrs-full_ProfitLossAttributableToOwnersOfParent"),
                                      ("당기순이익", "당기순이익(손실)",
                                       "지배기업의 소유주에게 귀속되는 당기순이익(손실)"))
                 equity = _amount(rows, ("BS",),
