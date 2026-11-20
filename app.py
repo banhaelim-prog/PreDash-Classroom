@@ -1044,7 +1044,7 @@ elif page=='연속 상승':
             st.download_button('TOP 5 CSV 다운로드',
                 data=__import__('pandas').DataFrame(result['top']).to_csv(index=False).encode('utf-8-sig'),
                 file_name=f"kis-5day-risers-{result['기준일']}.csv",mime='text/csv')
-            st.caption('거래량·거래대금 증가율은 최근 5거래일 평균과 그 직전 20거래일 평균 비교입니다. 재무점검은 PBR<1, ROE≥15%, 3년 영업이익 증가, 최근 영업현금흐름 양수를 각각 확인한 개수이며 매수 신호가 아닙니다.')
+            st.caption('거래량·거래대금 증가율은 최근 5거래일 평균과 그 직전 20거래일 평균 비교입니다. 재무점검은 PBR<1, ROE≥15%, 3년 시작 대비 영업이익 증가, 최근 영업현금흐름 양수를 각각 확인한 개수이며 매수 신호가 아닙니다.')
         else:
             st.info('기준일 현재 5거래일 연속 종가 상승 조건을 만족한 종목이 없습니다.')
         st.caption('가격: KIS 수정주가 · 재무: OpenDART 연결/별도 동일 기준 중 확보 가능한 자료 · 자료 부족은 공란 · 순위는 5일 누적 상승률 기준')
