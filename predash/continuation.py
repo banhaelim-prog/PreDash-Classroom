@@ -63,7 +63,7 @@ def _parse_master(payload: bytes, market: str, tail_size: int) -> list[dict]:
         # ST is a listed stock. ETPs and other security groups are excluded.
         if group != "ST":
             continue
-        if re.search(r"(?:스팩|기업인수목적)", name):
+        if re.search(r"(?:스팩|기업인수목적|우(?:B|C)?)$", name):
             continue
 
         if market == "코스피":
@@ -154,6 +154,9 @@ def fetch_daily_bars(client, code: str, start_day: date, end_day: date) -> list[
     }
     _, data = client.call("GET", DAILY_PATH, headers=headers, params=params)
     if str(data.get("rt_cd")) != "0":
+        message_code = str(data.get("msg_cd", ""))
+        if message_code.startswith("EGW002"):
+            raise ContinuationScanError("KIS API 호출 제한 응답을 받았습니다. 잠시 후 다시 시도하세요.")
         raise client.result_error(data, "연속 상승 일봉 조회 실패")
     rows = data.get("output2")
     if not isinstance(rows, list):
@@ -213,7 +216,12 @@ def scan_market(client, *, on_progress=None, bar_cache=None, universe_cache=None
 
     end_day = latest_completed_session_end()
     start_day = end_day - timedelta(days=65)
-    universe = universe_cache if universe_cache else load_universe()
+    if universe_cache:
+        universe = universe_cache
+    else:
+        universe = load_universe()
+        if isinstance(universe_cache, list):
+            universe_cache.extend(universe)
     cache = bar_cache if bar_cache is not None else {}
     qualified, failures = [], []
 
