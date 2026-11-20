@@ -883,7 +883,8 @@ CUSTOMS_API_KEY = "내 관세청 키"''',language='toml')
     st.caption('세션 입력 API 키와 계좌 식별정보는 로그아웃 시 함께 삭제됩니다. 장기 사용이 필요한 공공 API만 본인의 Streamlit Secrets에 저장하세요.')
 elif page=='매매 습관':
     st.title('매매 습관')
-    mode_label=st.radio('분석할 계좌',['실전 계좌','KIS 모의계좌'],horizontal=True,
+    account_options=['실전 계좌'] if account_settings().get('provider')=='toss' else ['실전 계좌','KIS 모의계좌']
+    mode_label=st.radio('분석할 계좌',account_options,horizontal=True,
         index=0 if account_settings()['mode']=='real' else 1)
     habit_mode='real' if mode_label=='실전 계좌' else 'demo'
     settings=account_settings(habit_mode)
