@@ -13,6 +13,7 @@ import predash.kis as kis_module
 if not hasattr(kis_module.KIS,'market_flow'):
     kis_module=importlib.reload(kis_module)
 KIS, BrokerError = kis_module.KIS, kis_module.BrokerError
+from predash.toss import Toss
 from predash.classroom import account_settings, connection_form
 from predash.macro import fetch_vix,relative,benchmark,MacroError
 from predash.analysis import review
@@ -118,8 +119,18 @@ def api_key_source(name):
     return '미연결'
 
 def kis_client(mode=None):
-    """Reuse the short-lived access token across Streamlit reruns in this session."""
+    """Backward-compatible broker factory; routes to the selected provider."""
     settings=account_settings(mode)
+    if settings.get('provider')=='toss':
+        if mode=='demo':
+            raise BrokerError('토스증권 Open API는 이 앱의 모의투자 계좌 모드와 호환되지 않습니다. 실전 조회를 선택하세요.')
+        cache_key='_toss_client'
+        client=st.session_state.get(cache_key)
+        if (client is None or not isinstance(client,Toss) or
+            any(getattr(client,attr)!=settings[attr] for attr in ('key','secret','account'))):
+            client=Toss(settings=settings)
+            st.session_state[cache_key]=client
+        return client
     cache_key='_kis_client_demo' if mode=='demo' else '_kis_client'
     client=st.session_state.get(cache_key)
     if client is None or not isinstance(client,KIS) or any(getattr(client,attr)!=settings[attr] for attr in ('key','secret','cano','product','mode')):
@@ -314,6 +325,9 @@ if page=='모의투자':
     st.html('<div class="pd-intro">KIS 모의계좌를 연결해 잔고와 실제 모의 체결 기록을 확인하세요.</div>')
     st.caption('한국투자증권 모의투자 서버 · 모의계좌 데이터 · 실전 잔고와 별도 보관')
     settings=account_settings('demo')
+    if settings.get('provider')=='toss':
+        st.warning('현재 선택된 토스증권 Open API는 실전 조회 전용입니다. 모의투자 페이지는 한국투자증권 모의계좌에서만 사용할 수 있습니다.')
+        st.stop()
     configured=all(settings[k] for k in ('key','secret','cano','product'))
     with st.expander('모의계좌 연결 방법',expanded=not configured):
         st.write('한국투자증권에서 모의투자 계좌를 발급받고, 그 모의계좌에 연결된 App Key와 App Secret을 발급받으세요.')
@@ -796,7 +810,7 @@ elif page=='연결 설정':
 
     connected=sum(bool(api_key(key)) for _,_,key,_,_ in api_specs)
     kis_connected=all(account_settings()[k] for k in ('key','secret','cano','product'))
-    st.html(f"<div class='pd-summary'><div><span>공공 API</span><strong>{connected}/4</strong><small>필요한 항목만 연결</small></div><div><span>증권사 KIS</span><strong>{'연결됨' if kis_connected else '미연결'}</strong><small>현재 세션 전용</small></div><div><span>저장 방식</span><strong>세션 보호</strong><small>로그아웃 시 입력 키 삭제</small></div></div>")
+    st.html(f"<div class='pd-summary'><div><span>공공 API</span><strong>{connected}/4</strong><small>필요한 항목만 연결</small></div><div><span>증권사 계좌</span><strong>{'연결됨' if kis_connected else '미연결'}</strong><small>현재 세션 전용</small></div><div><span>저장 방식</span><strong>세션 보호</strong><small>로그아웃 시 입력 키 삭제</small></div></div>")
 
     st.subheader('01 · 공공 데이터 API')
     st.caption('수강 중에는 아래에서 바로 입력할 수 있습니다. 장기 사용은 본인 Streamlit Secrets에 저장하면 매번 다시 입력할 필요가 없습니다.')
@@ -847,12 +861,13 @@ CUSTOMS_API_KEY = "내 관세청 키"''',language='toml')
         st.write('Streamlit Community Cloud → 해당 앱 → Settings → Secrets에 붙여 넣고 Save 합니다.')
 
     st.divider()
-    st.subheader('02 · 한국투자증권 계좌')
-    st.caption('증권사 App Key·Secret·계좌번호는 Streamlit Secrets에 저장하지 않고 현재 접속 세션에서만 사용합니다.')
+    st.subheader('02 · 증권사 계좌 연결')
+    st.caption('한국투자증권 또는 토스증권 Open API를 선택할 수 있습니다. 증권사 인증정보는 현재 접속 세션에서만 사용합니다.')
     connection_form()
     if kis_connected:
-        st.caption(f"현재 KIS 설정 · {'실전 조회' if account_settings()['mode']=='real' else '모의투자'} · 키와 계좌번호 원문은 표시하지 않습니다.")
-        if st.button('KIS 연결 진단 · 잔고 조회 권한 확인',type='primary',use_container_width=True):
+        provider_label='토스증권' if account_settings().get('provider')=='toss' else '한국투자증권'
+        st.caption(f"현재 연결 · {provider_label} · {'실전 조회' if account_settings()['mode']=='real' else '모의투자'} · 인증정보 원문은 표시하지 않습니다.")
+        if st.button('증권사 연결 진단 · 잔고 조회 권한 확인',type='primary',use_container_width=True):
             try:
                 client=kis_client()
                 client.authorize()
@@ -861,10 +876,11 @@ CUSTOMS_API_KEY = "내 관세청 키"''',language='toml')
                 st.success(f"2단계 · 국내주식 잔고 조회 성공 · 보유종목 {len(snapshot['positions'])}개")
             except BrokerError as exc:
                 st.error(str(exc))
+    st.link_button('토스증권 Open API 안내','https://home.tossinvest.com/ko/open-api',use_container_width=True)
     st.link_button('한국투자증권 API 신청','https://apiportal.koreainvestment.com/',use_container_width=True)
 
-    st.info('권장 순서 · 공공데이터 → DART → KIS → 필요할 때 KRX·관세청. 모든 API를 한 번에 준비할 필요는 없습니다.')
-    st.caption('세션 입력 API 키와 KIS 정보는 로그아웃 시 함께 삭제됩니다. 장기 사용이 필요한 공공 API만 본인의 Streamlit Secrets에 저장하세요.')
+    st.info('권장 순서 · 공공데이터 → DART → 증권사 계좌 → 필요할 때 KRX·관세청. 모든 API를 한 번에 준비할 필요는 없습니다.')
+    st.caption('세션 입력 API 키와 계좌 식별정보는 로그아웃 시 함께 삭제됩니다. 장기 사용이 필요한 공공 API만 본인의 Streamlit Secrets에 저장하세요.')
 elif page=='매매 습관':
     st.title('매매 습관')
     mode_label=st.radio('분석할 계좌',['실전 계좌','KIS 모의계좌'],horizontal=True,
@@ -877,7 +893,7 @@ elif page=='매매 습관':
     st.html(f"<div class='pd-badges'><span class='pd-badge gold'>분석 대상 · {mode_label}</span></div>")
     st.caption(f'{mode_label}의 체결 기록 분석 · 미체결·취소 제외 · 현재 로그인 세션에 보관')
     if not password or not all(settings[k] for k in ('key','secret','cano','product')):
-        st.warning('대시보드 비밀번호와 선택한 계좌의 KIS 키를 연결 설정에서 확인하세요.')
+        st.warning('대시보드 비밀번호와 선택한 증권사 계좌 연결을 확인하세요.')
         st.stop()
     trade_key='habit_trade_'+habit_mode
     price_key='habit_price_'+habit_mode
@@ -964,7 +980,7 @@ elif page=='연속 상승':
         st.warning('앱 비밀번호를 먼저 설정하고 로그인하세요.')
         st.stop()
     if not configured:
-        st.warning('연결 설정에서 본인 KIS 계좌를 연결하세요. 이 분석은 기존 kis_client()를 재사용합니다.')
+        st.warning('연결 설정에서 한국투자증권 또는 토스증권 Open API를 연결하세요. 선택한 증권사 시세 API를 사용합니다.')
         st.stop()
 
     st.info('전체 종목을 하나씩 조회합니다. 첫 실행은 수 분 이상 걸릴 수 있습니다. 조회 전용이며 주문 API는 사용하지 않습니다.')
@@ -981,7 +997,7 @@ elif page=='연속 상승':
                 text=f'전체 종목 조회 {done:,}/{total:,}')
             status.caption('현재 조회: '+name)
         try:
-            with st.spinner('KIS 일봉 시세를 수집하고 있습니다.'):
+            with st.spinner(('토스증권' if account_settings().get('provider')=='toss' else '한국투자증권')+' 일봉 시세를 수집하고 있습니다.'):
                 result=scan_market(
                     kis_client(),
                     on_progress=scan_progress,
