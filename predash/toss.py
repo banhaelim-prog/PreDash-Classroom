@@ -10,9 +10,7 @@ import requests
 
 BASE = "https://openapi.tossinvest.com"
 
-
-class BrokerError(RuntimeError):
-    pass
+from predash.kis import BrokerError
 
 
 def account_settings():
