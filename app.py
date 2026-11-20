@@ -971,7 +971,7 @@ elif page=='연속 상승':
     if 'continuation_bar_cache' not in st.session_state:
         st.session_state.continuation_bar_cache={}
     if 'continuation_universe_cache' not in st.session_state:
-        st.session_state.continuation_universe_cache=None
+        st.session_state.continuation_universe_cache=[]
 
     if st.button('코스피·코스닥 전체 분석 시작',type='primary',use_container_width=True):
         progress=st.progress(0,text='종목 목록 준비 중...')
@@ -990,9 +990,8 @@ elif page=='연속 상승':
                     pause_seconds=0.15,
                     top_n=5,
                 )
-            st.session_state.continuation_universe_cache=st.session_state.continuation_universe_cache or []
-            # The scanner's universe is downloaded once per session and the bar cache
-            # keeps successful ticker responses for subsequent reruns.
+            # The scanner fills the session's universe list on its first successful download;
+            # the bar cache keeps successful ticker responses for subsequent reruns.
             st.session_state.continuation_result=result
             progress.progress(1.0,text='가격 조건 분석 완료')
             status.empty()
